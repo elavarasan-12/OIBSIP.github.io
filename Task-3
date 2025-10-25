@@ -1,0 +1,90 @@
+# python password gen.py -l 20
+import secrets
+import string
+import argparse
+import sys
+
+try:
+    import pyperclip
+    HAVE_PYPERCLIP = True
+except Exception:
+    HAVE_PYPERCLIP = False
+
+AMBIGUOUS = "il1Lo0O"
+
+def build_alphabet(no_upper=False, no_digits=False, no_symbols=False, exclude_ambiguous=False):
+    alphabet = string.ascii_lowercase
+    if not no_upper:
+        alphabet += string.ascii_uppercase
+    if not no_digits:
+        alphabet += string.digits
+    if not no_symbols:
+        # chosen symbol set (safe)
+        alphabet += "!@#$%^&*()-_=+[]{};:,.<>/?"
+    if exclude_ambiguous:
+        alphabet = ''.join(ch for ch in alphabet if ch not in AMBIGUOUS)
+    return alphabet
+
+def generate_password(length, alphabet):
+    if not alphabet:
+        raise ValueError("Alphabet is empty. Enable some character sets.")
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
+
+def parse_args():
+    p = argparse.ArgumentParser(description="Secure CLI Password Generator")
+    p.add_argument("-l","--length", type=int, default=16, help="Length of each password (default: 16)")
+    p.add_argument("-n","--number", type=int, default=1, help="How many passwords to generate (default: 1)")
+    p.add_argument("--no-upper", action="store_true", help="Exclude uppercase letters")
+    p.add_argument("--no-digits", action="store_true", help="Exclude digits")
+    p.add_argument("--no-symbols", action="store_true", help="Exclude symbols")
+    p.add_argument("--no-ambiguous", action="store_true", help="Exclude ambiguous characters like 'l', '1', 'I', '0', 'O'")
+    p.add_argument("--copy", action="store_true", help="Copy the last generated password to clipboard (requires pyperclip)")
+    p.add_argument("--save", type=str, metavar="FILE", help="Append generated passwords to FILE")
+    p.add_argument("--show-stats", action="store_true", help="Show basic entropy estimate for each password")
+    return p.parse_args()
+
+def estimate_entropy(password, alphabet_size):
+    import math
+    return len(password) * math.log2(alphabet_size) if alphabet_size > 0 else 0
+
+def main():
+    args = parse_args()
+
+    if args.length <= 0 or args.number <= 0:
+        print("Length and number must be positive integers.", file=sys.stderr)
+        sys.exit(1)
+
+    alphabet = build_alphabet(no_upper=args.no_upper, no_digits=args.no_digits,
+                              no_symbols=args.no_symbols, exclude_ambiguous=args.no_ambiguous)
+
+    if not alphabet:
+        print("No characters selected to build password. Try enabling some character sets.", file=sys.stderr)
+        sys.exit(1)
+
+    generated = []
+    for i in range(args.number):
+        pw = generate_password(args.length, alphabet)
+        generated.append(pw)
+        print(f"[{i+1}] {pw}")
+        if args.show_stats:
+            entropy = estimate_entropy(pw, len(alphabet))
+            print(f"     Entropy ≈ {entropy:.1f} bits (alphabet size {len(alphabet)})")
+
+    if args.copy:
+        if not HAVE_PYPERCLIP:
+            print("pyperclip not installed. Install it with `pip install pyperclip` to use --copy.", file=sys.stderr)
+        else:
+            pyperclip.copy(generated[-1])
+            print("Last password copied to clipboard.")
+
+    if args.save:
+        try:
+            with open(args.save, "a", encoding="utf-8") as f:
+                for pw in generated:
+                    f.write(pw + "\n")
+            print(f"Saved {len(generated)} password(s) to {args.save}")
+        except Exception as e:
+            print(f"Could not save to file: {e}", file=sys.stderr)
+
+if __name__ == "__main__":
+    main()
