@@ -1,0 +1,51 @@
+
+import requests
+WEATHER_API_KEY = "f1ecf1eac456f7a61e20499334df9bd6"
+BASE_URL = "http://api.openweathermap.org/data/2.5/weather"
+def get_weather_by_pincode(pincode, country_code="IN"):
+    try:
+        params = {
+            "zip": f"{pincode},{country_code}",
+            "appid": WEATHER_API_KEY,
+            "units": "metric"
+        }
+        response = requests.get(BASE_URL, params=params)
+        data = response.json()
+
+        if response.status_code != 200:
+            return f"Error: {data.get('message', 'Could not fetch weather.')}"
+        
+        weather_info = {
+            "location": f"{data['name']}, {country_code}",
+            "temperature": data["main"]["temp"],
+            "description": data["weather"][0]["description"],
+            "humidity": data["main"]["humidity"],
+            "wind_speed": data["wind"]["speed"]
+        }
+        return weather_info
+
+    except Exception as e:
+        return f"Error fetching weather: {e}"
+
+def display_weather(weather_info):
+    if isinstance(weather_info, str):
+        print(weather_info)
+        return
+    print("\n🌤 Weather Information 🌤")
+    print(f"Location      : {weather_info['location']}")
+    print(f"Temperature   : {weather_info['temperature']} °C")
+    print(f"Description   : {weather_info['description'].title()}")
+    print(f"Humidity      : {weather_info['humidity']} %")
+    print(f"Wind Speed    : {weather_info['wind_speed']} m/s")
+    print("------------------------------")
+
+def main():
+    print("=== Indian PIN Code Weather CLI ===")
+    pincode = input("Enter Indian PIN code: ").strip()
+    if not pincode.isdigit() or len(pincode) != 6:
+        print(" Invalid PIN code. Enter a 6-digit number.")
+        return
+    weather_info = get_weather_by_pincode(pincode)
+    display_weather(weather_info)
+if __name__ == "__main__":
+    main()
