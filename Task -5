@@ -1,0 +1,57 @@
+import socket
+# Server configuration
+HOST = '127.0.0.1'  # localhost
+PORT = 12345        # port number
+# Create socket
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.bind((HOST, PORT))
+server.listen(1)
+print(f"Server listening on {HOST}:{PORT}...")
+conn, addr = server.accept()
+print(f"Connected by {addr}")
+try:
+    while True:
+        # Receive message from client
+        data = conn.recv(1024).decode()
+        if not data:
+            break
+        print(f"Client: {data}")
+
+        # Send message to client
+        msg = input("You: ")
+        conn.send(msg.encode())
+except KeyboardInterrupt:
+    print("\nServer closing...")
+
+finally:
+    conn.close()
+    server.close()
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------
+import socket
+
+# Client configuration
+HOST = '127.0.0.1'  # server IP
+PORT = 12345        # same port as server
+
+client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client.connect((HOST, PORT))
+print(f"Connected to server {HOST}:{PORT}")
+
+try:
+    while True:
+        # Send message to server
+        msg = input("You: ")
+        client.send(msg.encode())
+
+        # Receive message from server
+        data = client.recv(1024).decode()
+        if not data:
+            break
+        print(f"Server: {data}")
+
+except KeyboardInterrupt:
+    print("\nClient closing...")
+
+finally:
+    client.close()
