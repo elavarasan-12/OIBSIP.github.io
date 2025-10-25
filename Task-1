@@ -1,0 +1,276 @@
+import speech_recognition as sr
+import pyttsx3
+import datetime
+import webbrowser
+import time
+import openai
+import os
+import requests
+import json
+from typing import Optional
+class SmartVoiceAssistant:
+    def __init__(self, openai_api_key: Optional[str] = None):
+        # Initialize text-to-speech
+        self.engine = pyttsx3.init()
+        self.voices = self.engine.getProperty('voices')
+        self.engine.setProperty('rate', 150)
+        self.current_voice = 1
+        # Initialize speech recognition
+        self.recognizer = sr.Recognizer()
+        self.setup_microphone()
+        
+        # OpenAI configuration
+        self.openai_client = None
+        if openai_api_key:
+            openai.api_key = openai_api_key
+            self.openai_client = openai
+        elif os.getenv('OPENAI_API_KEY'):
+            openai.api_key = os.getenv('OPENAI_API_KEY')
+            self.openai_client = openai
+        
+        # Conversation history for context
+        self.conversation_history = []
+        
+        # Local command patterns
+        self.local_commands = {
+            'time': self.get_time,
+            'date': self.get_date,
+            'google': lambda: self.open_website("https://www.google.com"),
+            'youtube': lambda: self.open_website("https://www.youtube.com"),
+            'change voice': self.change_voice,
+            'your name': self.tell_name,
+            'exit': self.exit_assistant,
+            'clear history': self.clear_history
+        }
+    
+    def setup_microphone(self):
+        """Setup microphone"""
+        try:
+            self.microphone = sr.Microphone()
+            with self.microphone as source:
+                self.recognizer.adjust_for_ambient_noise(source, duration=2)
+            print("✅ Microphone ready!")
+            return True
+        except Exception as e:
+            print(f"❌ Microphone error: {e}")
+            return False
+    
+    def speak(self, text):
+        """Speak text"""
+        self.engine.setProperty('voice', self.voices[self.current_voice].id)
+        self.engine.say(text)
+        self.engine.runAndWait()
+    
+    def listen(self):
+        """Listen for voice input"""
+        try:
+            with self.microphone as source:
+                print("🎤 Listening...")
+                self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
+                audio = self.recognizer.listen(
+                    source, 
+                    timeout=8,
+                    phrase_time_limit=10
+                )
+            
+            print("🔍 Recognizing...")
+            query = self.recognizer.recognize_google(audio).lower()
+            print(f"👤 You: {query}")
+            return query
+            
+        except sr.WaitTimeoutError:
+            return ""
+        except sr.UnknownValueError:
+            self.speak("Sorry, I didn't understand that.")
+            return ""
+        except Exception as e:
+            print(f"❌ Listening error: {e}")
+            return ""
+    
+    # Local functionality methods
+    def get_time(self):
+        return f"The current time is {datetime.datetime.now().strftime('%I:%M %p')}"
+    
+    def get_date(self):
+        return f"Today's date is {datetime.datetime.now().strftime('%B %d, %Y')}"
+    
+    def open_website(self, url):
+        webbrowser.open(url)
+        return f"Opening {url.split('//')[-1].split('.')[0]}"
+    
+    def change_voice(self):
+        self.current_voice = 0 if self.current_voice == 1 else 1
+        voice_name = "Jarvis" if self.current_voice == 0 else "Friday"
+        return f"Voice changed to {voice_name}"
+    
+    def tell_name(self):
+        return "I am Friday" if self.current_voice == 1 else "I am Jarvis"
+    
+    def exit_assistant(self):
+        return "exit"
+    
+    def clear_history(self):
+        self.conversation_history.clear()
+        return "Conversation history cleared"
+    
+    def query_openai(self, user_input: str) -> str:
+        """Query OpenAI API for intelligent responses"""
+        if not self.openai_client:
+            return "OpenAI API is not configured. Please provide an API key."
+        
+        try:
+            # Add user message to conversation history
+            self.conversation_history.append({"role": "user", "content": user_input})
+            
+            # Keep only last 10 messages to manage context length
+            if len(self.conversation_history) > 10:
+                self.conversation_history = self.conversation_history[-10:]
+            
+            # System prompt to make responses conversational and appropriate for voice
+            system_prompt = {
+                "role": "system", 
+                "content": """You are a helpful voice assistant named Friday/Jarvis. 
+                Keep responses concise and natural for speech (under 2-3 sentences when possible). 
+                Be friendly and conversational. If asked about your capabilities, mention you can handle local commands like time, date, web search, and also answer general questions."""
+            }
+            
+            # Prepare messages for API call
+            messages = [system_prompt] + self.conversation_history
+            
+            response = self.openai_client.ChatCompletion.create(
+                model="gpt-3.5-turbo",  # or "gpt-4" if you have access
+                messages=messages,
+                max_tokens=150,
+                temperature=0.7
+            )
+            
+            assistant_reply = response.choices[0].message.content.strip()
+            
+            # Add assistant response to conversation history
+            self.conversation_history.append({"role": "assistant", "content": assistant_reply})
+            
+            return assistant_reply
+            
+        except openai.error.AuthenticationError:
+            return "OpenAI authentication failed. Please check your API key."
+        except openai.error.RateLimitError:
+            return "OpenAI API rate limit exceeded. Please try again later."
+        except openai.error.OpenAIError as e:
+            return f"OpenAI API error: {str(e)}"
+        except Exception as e:
+            return f"Unexpected error: {str(e)}"
+    
+    def process_command(self, command: str) -> str:
+        """Process commands with OpenAI fallback"""
+        if not command:
+            return "continue"
+        
+        command = command.lower()
+        
+        # Check for local commands first
+        for key, func in self.local_commands.items():
+            if key in command:
+                result = func()
+                if result == "exit":
+                    return "exit"
+                self.speak(result)
+                return "continue"
+        
+        # Special case for search
+        if command.startswith('search '):
+            query = command.replace('search', '').strip()
+            if query:
+                self.open_website(f"https://www.google.com/search?q={query}")
+                self.speak(f"Searching for {query}")
+                return "continue"
+        
+        # If no local command matches, use OpenAI
+        if self.openai_client:
+            print("🤔 Using OpenAI for response...")
+            self.speak("Let me think about that...")
+            ai_response = self.query_openai(command)
+            self.speak(ai_response)
+        else:
+            self.speak("I can only handle basic commands. To get smarter responses, please configure OpenAI API.")
+        
+        return "continue"
+    
+    def show_capabilities(self):
+        """Display assistant capabilities"""
+        capabilities = """
+🚀 ENHANCED VOICE ASSISTANT CAPABILITIES
+
+
+
+ Examples to try:
+• "What's the weather like today?"
+• "Explain quantum computing simply"
+• "Write a short poem about technology"
+• "How do I learn Python?"
+• "What are the latest space discoveries?"
+
+💡 Say "clear history" to reset conversation context
+        """
+        print(capabilities)
+        self.speak("I now have enhanced capabilities with AI! I can answer complex questions, have natural conversations, and help with creative tasks.")
+
+def main():
+    print("\n" + "="*60)
+    print("🧠 SMART VOICE ASSISTANT WITH OPENAI INTEGRATION")
+    print("="*60)
+    
+    # Get OpenAI API key
+    api_key = input("Enter your OpenAI API key (or press Enter to skip): ").strip()
+    if not api_key:
+        api_key = os.getenv('OPENAI_API_KEY')
+    
+    # Initialize assistant
+    assistant = SmartVoiceAssistant(api_key)
+    
+    # Voice selection
+    print("\n🎙️  Voice Selection:")
+    print("0 - jarvis (Male)")
+    print("1 - Friday (Female)")
+    
+    try:
+        choice = input("Choose voice (0/1, Enter for default): ").strip()
+        if choice in ['0', '1']:
+            assistant.current_voice = int(choice)
+    except:
+        pass
+    
+    assistant_name = "Jarvis" if assistant.current_voice == 0 else "Friday"
+    
+    # Initial greeting
+    print(f"\n✅ {assistant_name} initialized with AI capabilities!")
+    if assistant.openai_client:
+        assistant.speak(f"Hello! I am {assistant_name}, your AI-powered voice assistant. I'm ready to help with both local tasks and intelligent conversations!")
+    else:
+        assistant.speak(f"Hello! I am {assistant_name}. I can handle basic commands. For AI features, please configure OpenAI API.")
+    
+    assistant.show_capabilities()
+    
+    # Main interaction loop
+    while True:
+        try:
+            command = assistant.listen()
+            
+            if command == "":
+                continue
+            
+            result = assistant.process_command(command)
+            
+            if result == "exit":
+                assistant.speak("Goodbye! It was great assisting you!")
+                break
+                
+        except KeyboardInterrupt:
+            print("\n\n🛑 Program interrupted")
+            assistant.speak("Goodbye!")
+            break
+        except Exception as e:
+            print(f"❌ Error: {e}")
+            assistant.speak("Sorry, something went wrong. Let's try again.")
+
+if __name__ == "__main__":
+    main()
